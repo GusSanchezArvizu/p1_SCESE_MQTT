@@ -13,6 +13,7 @@
 #include "mqtt_freertos.h"
 
 #include "board.h"
+#include "stdint.h"
 #include "fsl_silicon_id.h"
 
 #include "lwip/opt.h"
@@ -28,7 +29,7 @@
 
 /*! @brief MQTT server host name or IP address. */
 #ifndef EXAMPLE_MQTT_SERVER_HOST
-#define EXAMPLE_MQTT_SERVER_HOST "broker.hivemq.com"
+#define EXAMPLE_MQTT_SERVER_HOST "industrial.api.ubidots.com"
 #endif
 
 /*! @brief MQTT server port number. */
@@ -47,6 +48,9 @@
 
 /*! @brief Priority of the temporary initialization thread. */
 #define APP_THREAD_PRIO DEFAULT_THREAD_PRIO
+
+
+#define BUFFER_SIZE 32
 
 /*******************************************************************************
  * Prototypes
@@ -67,8 +71,8 @@ static char client_id[(SILICONID_MAX_LENGTH * 2) + 5];
 /*! @brief MQTT client information. */
 static const struct mqtt_connect_client_info_t mqtt_client_info = {
     .client_id   = (const char *)&client_id[0],
-    .client_user = NULL,
-    .client_pass = NULL,
+    .client_user = "BBUS-D9r32SVvY22pmqw9vYLcE7CEHl3hus",
+    .client_pass = "a",
     .keep_alive  = 100,
     .will_topic  = NULL,
     .will_msg    = NULL,
@@ -85,10 +89,78 @@ static ip_addr_t mqtt_addr;
 /*! @brief Indicates connection to MQTT broker. */
 static volatile bool connected = false;
 
+static volatile uint8_t sec_count = 0;
+static volatile uint8_t min_count = 0;
+
+static uint8_t PTC = 0; //Parametro Tiempo Captura
+static uint8_t PTA = 0; //Paranetro Tiempo Alarma
+static uint8_t PTF = 0; //Parametro Tiempo Flash
+static uint8_t PTE = 0; //Parametro Tiempo Energia
+static uint8_t PTM = 0; //Parametro Tiempo Mantenimiento
+
 /*******************************************************************************
  * Code
  ******************************************************************************/
+/*!
+ * @bref Function made to simulate the tx of data form sensors
+ */
 
+void receive_sensor_data()
+{
+
+}
+/*!
+ * @brief Task for sensing (UART)
+ */
+void vTaskSec(void *pvParameters) {
+    while (1) {
+    	if(sec_count <= 59)
+    	{
+    		sec_count++;
+            //printf("Tarea ejecutándose cada segundo...\n");
+            vTaskDelay(pdMS_TO_TICKS(1000)); // Espera 1000 ms (1 segundo)
+    	}
+    	else
+    	{
+    		sec_count = 0;
+    		min_count++;
+    		if(min_count == PTC)
+    		{
+        		receive_sensor_data();
+    		}
+
+    	}
+    }
+}
+
+u8_t checkSubscritions(const u8_t* data, u16_t length)
+{
+	char buffer[BUFFER_SIZE] = {0}; // Buffer para almacenar el string
+	size_t buf_index = 0;
+
+	for (size_t i = 0; i < length; i++) {
+		if (isprint(data[i])) {
+			if (buf_index < BUFFER_SIZE - 1) { // Evitar desbordamiento
+				buffer[buf_index++] = (char)data[i];
+			}
+			PRINTF("%c", (char)data[i]); // Imprimir carácter
+		} else {
+			PRINTF("\\x%02x", data[i]); // Imprimir en formato hexadecimal
+		}
+	}
+
+	buffer[buf_index] = '\0'; // Finalizar string
+
+	// Intentar convertir el string a un entero de 8 bits si es numérico
+	uint8_t num_value = 0;
+	if (buf_index > 0 && strspn(buffer, "0123456789") == buf_index) {
+		num_value = (uint8_t)atoi(buffer);
+		PRINTF("\nNúmero convertido: %u\n", num_value);
+		return num_value;
+	} else {
+		PRINTF("\nString recibido: %s\n", buffer);
+	}
+}
 /*!
  * @brief Called when subscription request finishes.
  */
@@ -124,18 +196,19 @@ static void mqtt_incoming_data_cb(void *arg, const u8_t *data, u16_t len, u8_t f
     int i;
 
     LWIP_UNUSED_ARG(arg);
-
-    for (i = 0; i < len; i++)
-    {
-        if (isprint(data[i]))
-        {
-            PRINTF("%c", (char)data[i]);
-        }
-        else
-        {
-            PRINTF("\\x%02x", data[i]);
-        }
-    }
+    checkSubscritions(data,len);
+//    for (i = 0; i < len; i++)
+//    {
+//        if (isprint(data[i]))
+//        {
+//            PRINTF("%c", (char)data[i]);
+//
+//        }
+//        else
+//        {
+//            PRINTF("\\x%02x", data[i]);
+//        }
+//    }
 
     if (flags & MQTT_DATA_FLAG_LAST)
     {
@@ -148,11 +221,14 @@ static void mqtt_incoming_data_cb(void *arg, const u8_t *data, u16_t len, u8_t f
  */
 static void mqtt_subscribe_topics(mqtt_client_t *client)
 {
-    static const char *topics[] = {"lwip_topic/#", "lwip_other/#"};
-    int qos[]                   = {0, 1};
+    static const char *topics[] = { "/v1.6/devices/iteso_test_1/freq/lv",
+    								"/v1.6/devices/iteso_test_1/alarm/lv",
+    								"/v1.6/devices/iteso_test_1/flash/lv",
+    								"/v1.6/devices/iteso_test_1/mode/lv",
+    								"/v1.6/devices/iteso_test_1/main/lv"};
+    int qos[]                   = {0,0,0,0,0};
     err_t err;
     int i;
-
     mqtt_set_inpub_callback(client, mqtt_incoming_publish_cb, mqtt_incoming_data_cb,
                             LWIP_CONST_CAST(void *, &mqtt_client_info));
 
@@ -252,7 +328,7 @@ static void mqtt_message_published_cb(void *arg, err_t err)
  */
 static void publish_message(void *ctx)
 {
-    static const char *topic   = "lwip_topic/100";
+    static const char *topic   = "/v1.6/devices/ITESO_Test_1/temperature";
     static const char *message = "message from board";
 
     LWIP_UNUSED_ARG(ctx);
@@ -306,21 +382,21 @@ static void app_thread(void *arg)
         PRINTF("Failed to obtain IP address: %d.\r\n", err);
     }
 
-    /* Publish some messages */
-    for (i = 0; i < 5;)
-    {
-        if (connected)
-        {
-            err = tcpip_callback(publish_message, NULL);
-            if (err != ERR_OK)
-            {
-                PRINTF("Failed to invoke publishing of a message on the tcpip_thread: %d.\r\n", err);
-            }
-            i++;
-        }
-
-        sys_msleep(1000U);
-    }
+//    /* Publish some messages */
+//    for (i = 0; i < 5;)
+//    {
+//        if (connected)
+//        {
+//            err = tcpip_callback(publish_message, NULL);
+//            if (err != ERR_OK)
+//            {
+//                PRINTF("Failed to invoke publishing of a message on the tcpip_thread: %d.\r\n", err);
+//            }
+//            i++;
+//        }
+//
+//        sys_msleep(1000U);
+//    }
 
     vTaskDelete(NULL);
 }
@@ -403,5 +479,10 @@ void mqtt_freertos_run_thread(struct netif *netif)
     if (sys_thread_new("app_task", app_thread, netif, APP_THREAD_STACKSIZE, APP_THREAD_PRIO) == NULL)
     {
         LWIP_ASSERT("mqtt_freertos_start_thread(): Task creation failed.", 0);
+    }
+
+    if(sys_thread_new("vTaskSec", vTaskSec, netif, APP_THREAD_STACKSIZE, APP_THREAD_PRIO) == NULL)
+    {
+    	LWIP_ASSERT("vTaskSec(): Task creation failed.", 0);
     }
 }
