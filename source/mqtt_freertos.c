@@ -92,12 +92,28 @@ static volatile bool connected = false;
 static volatile uint8_t sec_count = 0;
 static volatile uint8_t min_count = 0;
 
-static uint8_t PTC = 0; //Parametro Tiempo Captura
-static uint8_t PTA = 0; //Paranetro Tiempo Alarma
-static uint8_t PTF = 0; //Parametro Tiempo Flash
-static uint8_t PTE = 0; //Parametro Tiempo Energia
-static uint8_t PTM = 0; //Parametro Tiempo Mantenimiento
+static volatile u8_t topic_value = 0;
+static volatile char* topic_name ="";
 
+static const char* PTC_topic = "/v1.6/devices/iteso_test_1/freq/lv";
+static const char* PTA_topic = "/v1.6/devices/iteso_test_1/alarm/lv";
+static const char* PTF_topic = "/v1.6/devices/iteso_test_1/flash/lv";
+static const char* PTE_topic = "/v1.6/devices/iteso_test_1/mode/lv";
+static const char* PTM_topic = "/v1.6/devices/iteso_test_1/main/lv";
+
+static volatile u8_t PTC;
+static volatile u8_t PTA;
+static volatile u8_t PTF;
+static volatile u8_t PTE;
+static volatile u8_t PTM;
+
+typedef struct
+{
+	volatile u8_t value;
+	char *param;
+}incoming_sub_t;
+
+incoming_sub_t msg_r;
 /*******************************************************************************
  * Code
  ******************************************************************************/
@@ -126,6 +142,7 @@ void vTaskSec(void *pvParameters) {
     		min_count++;
     		if(min_count == PTC)
     		{
+    			PRINTF(" - vTaskSec - : DATA\r\n");
         		receive_sensor_data();
     		}
 
@@ -133,33 +150,82 @@ void vTaskSec(void *pvParameters) {
     }
 }
 
-u8_t checkSubscritions(const u8_t* data, u16_t length)
+void doSomething(char* topic, u8_t value)
 {
-	char buffer[BUFFER_SIZE] = {0}; // Buffer para almacenar el string
-	size_t buf_index = 0;
-
-	for (size_t i = 0; i < length; i++) {
-		if (isprint(data[i])) {
-			if (buf_index < BUFFER_SIZE - 1) { // Evitar desbordamiento
-				buffer[buf_index++] = (char)data[i];
-			}
-			PRINTF("%c", (char)data[i]); // Imprimir carácter
-		} else {
-			PRINTF("\\x%02x", data[i]); // Imprimir en formato hexadecimal
+	if(!(strcmp(topic,PTC_topic)))
+	{
+		if(value>0 && value <=60)
+		{
+			PTC = value;
+			PRINTF(" - ACTION - : PTC PARAMETER CHANGED\r\n");
+		}
+		else
+		{
+			PRINTF(" - ACTION - : INVALID PTC PARAMETER\r\n");
 		}
 	}
+	else if (!(strcmp(topic,PTA_topic)))
+	{
+		if(value == 1)
+		{
+			//Enciende alarma
+			PRINTF(" - ACTION - : AAAAAAAALAAAAAAARMAAAAAAAAAAA\r\n");
 
-	buffer[buf_index] = '\0'; // Finalizar string
-
-	// Intentar convertir el string a un entero de 8 bits si es numérico
-	uint8_t num_value = 0;
-	if (buf_index > 0 && strspn(buffer, "0123456789") == buf_index) {
-		num_value = (uint8_t)atoi(buffer);
-		PRINTF("\nNúmero convertido: %u\n", num_value);
-		return num_value;
-	} else {
-		PRINTF("\nString recibido: %s\n", buffer);
+		}
+		else
+		{
+			//Apaga alarma
+			PRINTF(" - ACTION - : SE APAGA ALARMA\r\n");
+		}
 	}
+	else if (!(strcmp(topic,PTF_topic)))
+	{
+		if(value == 1)
+		{
+			PRINTF(" - ACTION - : FLASH ON\r\n");
+		}
+		else
+		{
+			PRINTF(" - ACTION - : FLASH OFF\r\n");
+		}
+	}
+	else if (!(strcmp(topic,PTE_topic)))
+	{
+		if(value == 1)
+		{
+			//Se duerme
+			PRINTF(" - ACTION - : MODO AHORRO ENERGIA\r\n");
+		}
+		else
+		{
+			//Modo normal
+			PRINTF(" - ACTION - : MODO NORMAL ENERGIA\r\n");
+		}
+	}
+	else if (!(strcmp(topic,PTM_topic)))
+	{
+		if(value == 1)
+		{
+			PRINTF(" - ACTION - : FOTA\r\n");
+		}
+		else
+		{
+			PRINTF(" - ACTION - : EJECUCION\r\n");
+		}
+	}
+	else
+	{
+		PRINTF(" - WARNING - : ALGO EXTRANO OCURRIO\r\n");
+	}
+}
+
+u8_t checkSubscritions(const u8_t* data, u16_t length)
+{
+    char *dot_pos = strchr(data, '.');
+    if (dot_pos != NULL) {
+        *dot_pos = '\0';
+    }
+    return atoi(data);
 }
 /*!
  * @brief Called when subscription request finishes.
@@ -184,8 +250,9 @@ static void mqtt_topic_subscribed_cb(void *arg, err_t err)
 static void mqtt_incoming_publish_cb(void *arg, const char *topic, u32_t tot_len)
 {
     LWIP_UNUSED_ARG(arg);
-
     PRINTF("Received %u bytes from the topic \"%s\": \"", tot_len, topic);
+    msg_r.param = malloc(strlen(topic) + 1);
+    strcpy(msg_r.param,topic);
 }
 
 /*!
@@ -193,22 +260,11 @@ static void mqtt_incoming_publish_cb(void *arg, const char *topic, u32_t tot_len
  */
 static void mqtt_incoming_data_cb(void *arg, const u8_t *data, u16_t len, u8_t flags)
 {
-    int i;
-
     LWIP_UNUSED_ARG(arg);
-    checkSubscritions(data,len);
-//    for (i = 0; i < len; i++)
-//    {
-//        if (isprint(data[i]))
-//        {
-//            PRINTF("%c", (char)data[i]);
-//
-//        }
-//        else
-//        {
-//            PRINTF("\\x%02x", data[i]);
-//        }
-//    }
+
+    msg_r.value = checkSubscritions(data,len);
+
+    doSomething(msg_r.param,msg_r.value);
 
     if (flags & MQTT_DATA_FLAG_LAST)
     {
@@ -326,15 +382,10 @@ static void mqtt_message_published_cb(void *arg, err_t err)
 /*!
  * @brief Publishes a message. To be called on tcpip_thread.
  */
-static void publish_message(void *ctx)
+static void publish_message(char* topic, char* message, void *ctx)
 {
-    static const char *topic   = "/v1.6/devices/ITESO_Test_1/temperature";
-    static const char *message = "message from board";
-
     LWIP_UNUSED_ARG(ctx);
-
     PRINTF("Going to publish to the topic \"%s\"...\r\n", topic);
-
     mqtt_publish(mqtt_client, topic, message, strlen(message), 1, 0, mqtt_message_published_cb, (void *)topic);
 }
 
