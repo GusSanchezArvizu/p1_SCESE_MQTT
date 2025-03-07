@@ -21,6 +21,9 @@
 #include "lwip/apps/mqtt.h"
 #include "lwip/tcpip.h"
 
+#include <time.h>
+#include <stdio.h>
+
 // FIXME cleanup
 
 /*******************************************************************************
@@ -99,13 +102,21 @@ static const char* PTC_topic = "/v1.6/devices/iteso_test_1/freq/lv";
 static const char* PTA_topic = "/v1.6/devices/iteso_test_1/alarm/lv";
 static const char* PTF_topic = "/v1.6/devices/iteso_test_1/flash/lv";
 static const char* PTE_topic = "/v1.6/devices/iteso_test_1/mode/lv";
-static const char* PTM_topic = "/v1.6/devices/iteso_test_1/main/lv";
+//static const char* PTM_topic = "/v1.6/devices/iteso_test_1/main/lv";
+
+static char* temperature = 	"/v1.6/devices/iteso_test_1/temperature";
+static char* uv = 			"/v1.6/devices/iteso_test_1/uv_level";
+static char* rH = 			"/v1.6/devices/iteso_test_1/r_humidity";
+static char* noise = 		"/v1.6/devices/iteso_test_1/noise_db";
+//static char* aqi = 			"/v1.6/devices/iteso_test_1/aqi";
 
 static volatile u8_t PTC;
 static volatile u8_t PTA;
 static volatile u8_t PTF;
 static volatile u8_t PTE;
 static volatile u8_t PTM;
+
+int data[1][5];
 
 typedef struct
 {
@@ -120,35 +131,20 @@ incoming_sub_t msg_r;
 /*!
  * @bref Function made to simulate the tx of data form sensors
  */
+int generate_random(int min, int max) {
+    return rand() % (max - min + 1) + min;
+}
 
 void receive_sensor_data()
 {
-
+    srand(time(NULL));
+    data[0][0] = generate_random(8, 45);
+    data[0][1] = generate_random(0, 100);
+    data[0][2] = generate_random(0, 500);
+    data[0][3] = generate_random(0, 150);
+    data[0][4] = generate_random(0, 7);
 }
-/*!
- * @brief Task for sensing (UART)
- */
-void vTaskSec(void *pvParameters) {
-    while (1) {
-    	if(sec_count <= 59)
-    	{
-    		sec_count++;
-            //printf("Tarea ejecutándose cada segundo...\n");
-            vTaskDelay(pdMS_TO_TICKS(1000)); // Espera 1000 ms (1 segundo)
-    	}
-    	else
-    	{
-    		sec_count = 0;
-    		min_count++;
-    		if(min_count == PTC)
-    		{
-    			PRINTF(" - vTaskSec - : DATA\r\n");
-        		receive_sensor_data();
-    		}
 
-    	}
-    }
-}
 
 void doSomething(char* topic, u8_t value)
 {
@@ -200,17 +196,6 @@ void doSomething(char* topic, u8_t value)
 		{
 			//Modo normal
 			PRINTF(" - ACTION - : MODO NORMAL ENERGIA\r\n");
-		}
-	}
-	else if (!(strcmp(topic,PTM_topic)))
-	{
-		if(value == 1)
-		{
-			PRINTF(" - ACTION - : FOTA\r\n");
-		}
-		else
-		{
-			PRINTF(" - ACTION - : EJECUCION\r\n");
 		}
 	}
 	else
@@ -280,9 +265,8 @@ static void mqtt_subscribe_topics(mqtt_client_t *client)
     static const char *topics[] = { "/v1.6/devices/iteso_test_1/freq/lv",
     								"/v1.6/devices/iteso_test_1/alarm/lv",
     								"/v1.6/devices/iteso_test_1/flash/lv",
-    								"/v1.6/devices/iteso_test_1/mode/lv",
-    								"/v1.6/devices/iteso_test_1/main/lv"};
-    int qos[]                   = {0,0,0,0,0};
+    								"/v1.6/devices/iteso_test_1/mode/lv"};
+    int qos[]                   = {0,0,0,0};
     err_t err;
     int i;
     mqtt_set_inpub_callback(client, mqtt_incoming_publish_cb, mqtt_incoming_data_cb,
@@ -382,11 +366,72 @@ static void mqtt_message_published_cb(void *arg, err_t err)
 /*!
  * @brief Publishes a message. To be called on tcpip_thread.
  */
-static void publish_message(char* topic, char* message, void *ctx)
+static void publish_message(void *ctx)
 {
+
+    int i;
+    err_t err;
+    static const char *topic[]   = {"/v1.6/devices/iteso_test_1/temperature/lv",
+    		"/v1.6/devices/iteso_test_1/uv_level/lv",
+			"/v1.6/devices/iteso_test_1/r_humidity/lv",
+			"/v1.6/devices/iteso_test_1/noise_db/lv"};
+    static const char *message = "";
+
     LWIP_UNUSED_ARG(ctx);
-    PRINTF("Going to publish to the topic \"%s\"...\r\n", topic);
-    mqtt_publish(mqtt_client, topic, message, strlen(message), 1, 0, mqtt_message_published_cb, (void *)topic);
+
+
+    for (i = 0; i < ARRAY_SIZE(topic); i++)
+    {
+    	// delay(1000);
+    	vTaskDelay(100);
+    	message = (const char*)data[0][i];
+    	PRINTF("Going to publish to the topic \"%s\"...\r\n", topic[i]);
+    	err = mqtt_publish(mqtt_client, topic[i], message, strlen(message), 1, 0, mqtt_message_published_cb, (void *)topic[i]);
+        if (err == ERR_OK)
+        {
+            PRINTF("Publishing to the topic \"%s\" ...\r\n", topic[i]);
+        }
+        else
+        {
+            PRINTF("Failed to publish to the topic \"%s\" with err %d\r\n", topic[i], err);
+        }
+    }
+
+
+}
+/*!
+ * @brief Task for sensing (UART)
+ */
+void vTaskSec(void *pvParameters) {
+    err_t err;
+    char message[10];
+    while (1) {
+    	if(sec_count <= 59)
+    	{
+    		sec_count++;
+            //printf("Tarea ejecutándose cada segundo...\n");
+            vTaskDelay(pdMS_TO_TICKS(1000)); // Espera 1000 ms (1 segundo)
+    	}
+    	else
+    	{
+    		sec_count = 0;
+    		min_count++;
+    		if(min_count == PTC)
+    		{
+    			PRINTF(" - vTaskSec - : DATA\r\n");
+        		receive_sensor_data();
+        		if (connected)
+				{
+					err = tcpip_callback(publish_message, NULL);
+					if (err != ERR_OK)
+					{
+						PRINTF("Failed to invoke publishing of a message on the tcpip_thread: %d.\r\n", err);
+					}
+				}
+        		min_count = 0;
+    		}
+    	}
+    }
 }
 
 /*!
