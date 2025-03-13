@@ -105,7 +105,7 @@ static const char* PTE_topic = "/v1.6/devices/iteso_test_1/mode/lv";
 //static const char* PTM_topic = "/v1.6/devices/iteso_test_1/main/lv";
 
 static char* temperature = 	"/v1.6/devices/iteso_test_1/temperature";
-static char* uv = 			"/v1.6/devices/iteso_test_1/uv_level";
+static char* uv = 			"/v1.6/devices/iteso_test_1/uv_ level";
 static char* rH = 			"/v1.6/devices/iteso_test_1/r_humidity";
 static char* noise = 		"/v1.6/devices/iteso_test_1/noise_db";
 //static char* aqi = 			"/v1.6/devices/iteso_test_1/aqi";
@@ -114,9 +114,16 @@ static volatile u8_t PTC;
 static volatile u8_t PTA;
 static volatile u8_t PTF;
 static volatile u8_t PTE;
-static volatile u8_t PTM;
 
-int data[1][5];
+static char message[128];
+
+u16_t data[1][4];
+
+typedef struct
+{
+	char topic[256];
+	char msg[128];
+}publish_pack_t;
 
 typedef struct
 {
@@ -124,6 +131,7 @@ typedef struct
 	char *param;
 }incoming_sub_t;
 
+publish_pack_t msg_p;
 incoming_sub_t msg_r;
 /*******************************************************************************
  * Code
@@ -137,12 +145,10 @@ int generate_random(int min, int max) {
 
 void receive_sensor_data()
 {
-    srand(time(NULL));
-    data[0][0] = generate_random(8, 45);
-    data[0][1] = generate_random(0, 100);
-    data[0][2] = generate_random(0, 500);
-    data[0][3] = generate_random(0, 150);
-    data[0][4] = generate_random(0, 7);
+    data[0][0] = generate_random(8, 45); //Temperatura
+    data[0][1] = generate_random(0, 100); //Humedad
+    data[0][2] = generate_random(0, 150); //Ruido
+    data[0][3] = generate_random(0, 7); //Uv
 }
 
 
@@ -278,7 +284,7 @@ static void mqtt_subscribe_topics(mqtt_client_t *client)
 
         if (err == ERR_OK)
         {
-            PRINTF("Subscribing to the topic \"%s\" with QoS %d...\r\n", topics[i], qos[i]);
+            //PRINTF("Subscribing to the topic \"%s\" with QoS %d...\r\n", topics[i], qos[i]);
         }
         else
         {
@@ -355,7 +361,7 @@ static void mqtt_message_published_cb(void *arg, err_t err)
 
     if (err == ERR_OK)
     {
-        PRINTF("Published to the topic \"%s\".\r\n", topic);
+        //PRINTF("Published to the topic \"%s\".\r\n", topic);
     }
     else
     {
@@ -371,32 +377,19 @@ static void publish_message(void *ctx)
 
     int i;
     err_t err;
-    static const char *topic[]   = {"/v1.6/devices/iteso_test_1/temperature/lv",
-    		"/v1.6/devices/iteso_test_1/uv_level/lv",
-			"/v1.6/devices/iteso_test_1/r_humidity/lv",
-			"/v1.6/devices/iteso_test_1/noise_db/lv"};
-    static const char *message = "";
+    publish_pack_t *pack = (publish_pack_t *)ctx;
+    const char *topic = pack->topic;  // Ahora sí puedes acceder a topic
+    const char *message = pack->msg;
 
-    LWIP_UNUSED_ARG(ctx);
-
-
-    for (i = 0; i < ARRAY_SIZE(topic); i++)
-    {
-    	// delay(1000);
-    	vTaskDelay(100);
-    	message = (const char*)data[0][i];
-    	PRINTF("Going to publish to the topic \"%s\"...\r\n", topic[i]);
-    	err = mqtt_publish(mqtt_client, topic[i], message, strlen(message), 1, 0, mqtt_message_published_cb, (void *)topic[i]);
+    	err = mqtt_publish(mqtt_client, topic, message, strlen(message), 0, 0, mqtt_message_published_cb, (void *)topic);
         if (err == ERR_OK)
         {
-            PRINTF("Publishing to the topic \"%s\" ...\r\n", topic[i]);
+            PRINTF("Publishing to the topic \"%s\" the message: \"%s\"...\r\n", topic, message);
         }
         else
         {
-            PRINTF("Failed to publish to the topic \"%s\" with err %d\r\n", topic[i], err);
+            PRINTF("Failed to publish to the topic \"%s\" with err %d\r\n", topic, err);
         }
-    }
-
 
 }
 /*!
@@ -405,31 +398,43 @@ static void publish_message(void *ctx)
 void vTaskSec(void *pvParameters) {
     err_t err;
     char message[10];
-    while (1) {
-    	if(sec_count <= 59)
+	static const char *topic[]   = {"/v1.6/devices/iteso_test_1/temperature",
+			"/v1.6/devices/iteso_test_1/r_humidity",
+			"/v1.6/devices/iteso_test_1/noise_db",
+			"/v1.6/devices/iteso_test_1/uv_level"
+			};
+
+    while (1)
+    {
+    	vTaskDelay(pdMS_TO_TICKS(1000)); // Espera 1000 ms (1 segundo)
+    	sec_count++;
+    	uint8_t isPtcTime = sec_count%PTC;
+
+    	if(isPtcTime == 0)
     	{
-    		sec_count++;
-            //printf("Tarea ejecutándose cada segundo...\n");
-            vTaskDelay(pdMS_TO_TICKS(1000)); // Espera 1000 ms (1 segundo)
-    	}
-    	else
-    	{
-    		sec_count = 0;
-    		min_count++;
-    		if(min_count == PTC)
-    		{
-    			PRINTF(" - vTaskSec - : DATA\r\n");
-        		receive_sensor_data();
-        		if (connected)
+			PRINTF(" - vTaskSec - : DATA\r\n");
+    		receive_sensor_data();
+
+    		if (connected)
+			{
+				for (int i = 0; i < ARRAY_SIZE(topic); i++)
 				{
-					err = tcpip_callback(publish_message, NULL);
+					snprintf(msg_p.msg, sizeof(msg_p.msg), "%u", data[0][i]);
+					strcpy(msg_p.topic, topic[i]);
+
+					vTaskDelay(100);
+					err = tcpip_callback(publish_message, (void*)&msg_p);
 					if (err != ERR_OK)
 					{
 						PRINTF("Failed to invoke publishing of a message on the tcpip_thread: %d.\r\n", err);
 					}
 				}
-        		min_count = 0;
-    		}
+			}
+            //printf("Tarea ejecutándose cada segundo...\n");
+    	}
+    	if(sec_count == 60)
+    	{
+    		sec_count = 0;
     	}
     }
 }
@@ -569,6 +574,7 @@ void mqtt_freertos_run_thread(struct netif *netif)
         {
         }
     }
+    srand(time(NULL));
 
     generate_client_id();
 
@@ -580,5 +586,10 @@ void mqtt_freertos_run_thread(struct netif *netif)
     if(sys_thread_new("vTaskSec", vTaskSec, netif, APP_THREAD_STACKSIZE, APP_THREAD_PRIO) == NULL)
     {
     	LWIP_ASSERT("vTaskSec(): Task creation failed.", 0);
+    }
+
+    if(sys_thread_new("vTaskSub", vTaskSub, netif, APP_THREAD_STACKSIZE, APP_THREAD_PRIO) == NULL)
+    {
+    	LWIP_ASSERT("vTaskSub(): Task creation failed.", 0);
     }
 }
