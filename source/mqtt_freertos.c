@@ -185,10 +185,12 @@ void doSomething(char* topic, u8_t value)
 		if(value == 1)
 		{
 			PRINTF(" - ACTION - : FLASH ON\r\n");
+//			LED_BLUE_ON();
 		}
 		else
 		{
 			PRINTF(" - ACTION - : FLASH OFF\r\n");
+//			LED_BLUE_OFF();
 		}
 	}
 	else if (!(strcmp(topic,PTE_topic)))
@@ -392,6 +394,20 @@ static void publish_message(void *ctx)
         }
 
 }
+
+void vTaskSub(void *pvParameters)
+{
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    const TickType_t xFrequency = pdMS_TO_TICKS(1000);
+
+    for (;;)
+    {
+//    	PRINTF("Task running every 1 second\r\n");
+
+        // Block until the next cycle
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+    }
+}
 /*!
  * @brief Task for sensing (UART)
  */
@@ -406,7 +422,8 @@ void vTaskSec(void *pvParameters) {
 
     while (1)
     {
-    	vTaskDelay(pdMS_TO_TICKS(1000)); // Espera 1000 ms (1 segundo)
+    	sys_msleep(1000U);
+//    	vTaskDelay(pdMS_TO_TICKS(1000)); // Espera 1000 ms (1 segundo)
     	sec_count++;
     	uint8_t isPtcTime = sec_count%PTC;
 
@@ -422,7 +439,7 @@ void vTaskSec(void *pvParameters) {
 					snprintf(msg_p.msg, sizeof(msg_p.msg), "%u", data[0][i]);
 					strcpy(msg_p.topic, topic[i]);
 
-					vTaskDelay(100);
+					//vTaskDelay(100);
 					err = tcpip_callback(publish_message, (void*)&msg_p);
 					if (err != ERR_OK)
 					{
@@ -431,6 +448,10 @@ void vTaskSec(void *pvParameters) {
 				}
 			}
             //printf("Tarea ejecutándose cada segundo...\n");
+    	}
+    	else
+    	{
+
     	}
     	if(sec_count == 60)
     	{
@@ -574,7 +595,7 @@ void mqtt_freertos_run_thread(struct netif *netif)
         {
         }
     }
-    srand(time(NULL));
+
 
     generate_client_id();
 
@@ -588,8 +609,8 @@ void mqtt_freertos_run_thread(struct netif *netif)
     	LWIP_ASSERT("vTaskSec(): Task creation failed.", 0);
     }
 
-    if(sys_thread_new("vTaskSub", vTaskSub, netif, APP_THREAD_STACKSIZE, APP_THREAD_PRIO) == NULL)
-    {
-    	LWIP_ASSERT("vTaskSub(): Task creation failed.", 0);
-    }
+//    if(sys_thread_new("vTaskSub", vTaskSub, netif, APP_THREAD_STACKSIZE, APP_THREAD_PRIO) == NULL)
+//    {
+//    	LWIP_ASSERT("vTaskSub(): Task creation failed.", 0);
+//    }
 }

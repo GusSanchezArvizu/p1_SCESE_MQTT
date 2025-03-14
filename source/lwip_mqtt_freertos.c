@@ -21,6 +21,9 @@
 #include "lwip/netifapi.h"
 #include "ethernetif.h"
 
+#include "rgb_led.h"
+#include <time.h>
+
 /*******************************************************************************
  * Definitions
  ******************************************************************************/
@@ -114,7 +117,8 @@ static void stack_init(void *arg)
 int main(void)
 {
     BOARD_InitHardware();
-
+    srand(time(NULL));
+//    rgb_init();
     /* Initialize lwIP from thread */
     if (sys_thread_new("main", stack_init, NULL, INIT_THREAD_STACKSIZE, INIT_THREAD_PRIO) == NULL)
     {
